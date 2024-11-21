@@ -74,7 +74,7 @@ function spawnCache(i: number, j: number) {
     popupDiv.innerHTML = `
     <div>Cache Location: "${i},${j}" Available Coins: <span id="value">${
       (caches.get(i.toString() + j.toString())!).toString()
-    }</span></div><button id="deposit">Deposit</button> <button id="withdrawal">Collect</button>`;
+    }</span></div><button id="deposit">Deposit coins</button> <button id="withdrawal">Collect coins</button>`;
 
     const updateUserCoinView = () => {
       popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML =
