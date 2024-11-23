@@ -1,3 +1,7 @@
+/*  Implements the flyweight pattern to grid cells, ensuring that there is at most one instance of
+  each distinct Cell object active in the program at any point in time.
+*/
+
 import leaflet from "leaflet";
 
 interface Cell {
@@ -8,6 +12,7 @@ interface Cell {
 export class Board {
   readonly tileWidth: number;
   readonly tileVisibilityRadius: number;
+
   private readonly knownCells: Map<string, Cell>;
 
   constructor(tileWidth: number, tileVisibilityRadius: number) {
@@ -16,22 +21,21 @@ export class Board {
     this.knownCells = new Map();
   }
 
-  // Updated to accept coordinates (i, j) directly
-  private getCanonicalCell(i: number, j: number): Cell {
-    const key = `${i},${j}`; // Create a unique key based on the coordinates
+  private getCanonicalCell(cell: Cell): Cell {
+    const { i, j } = cell;
+    const key = [i, j].toString();
+
     if (!this.knownCells.has(key)) {
-      // Create and store a new Cell only if it doesn't already exist
-      const cell = { i, j };
       this.knownCells.set(key, cell);
     }
     return this.knownCells.get(key)!;
   }
 
-  // Updated to pass i and j directly
   getCellForPoint(point: leaflet.LatLng): Cell {
-    const i = Math.floor(point.lat);
-    const j = Math.floor(point.lng);
-    return this.getCanonicalCell(i, j);
+    return this.getCanonicalCell({
+      i: Math.floor(point.lat / this.tileWidth),
+      j: Math.floor(point.lng / this.tileWidth),
+    });
   }
 
   getCellBounds(cell: Cell): leaflet.LatLngBounds {
@@ -45,24 +49,32 @@ export class Board {
         (cell.j + 1) * this.tileWidth,
       ],
     ]);
-    return bounds;
+    return leaflet.latLngBounds(bounds);
   }
 
   getCellsNearPoint(point: leaflet.LatLng): Cell[] {
     const resultCells: Cell[] = [];
     const originCell = this.getCellForPoint(point);
-    for (let i = 0; i < this.knownCells.size; i++) {
-      for (let j = 0; j < this.knownCells.size; j++) {
-        const tempCell = this.getCanonicalCell(i, j); // Use coordinates directly
-        const distance = Math.sqrt(
-          Math.pow(tempCell.i - originCell.i, 2) +
-            Math.pow(tempCell.j - originCell.j, 2),
+
+    for (
+      let x = -this.tileVisibilityRadius;
+      x <= this.tileVisibilityRadius;
+      x++
+    ) {
+      for (
+        let y = -this.tileVisibilityRadius;
+        y <= this.tileVisibilityRadius;
+        y++
+      ) {
+        resultCells.push(
+          this.getCanonicalCell({
+            i: (originCell.i + x),
+            j: (originCell.j + y),
+          }),
         );
-        if (distance <= this.tileVisibilityRadius) {
-          resultCells.push(tempCell);
-        }
       }
     }
+
     return resultCells;
   }
 }

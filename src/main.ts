@@ -7,8 +7,11 @@ import "./style.css";
 import "./leafletWorkaround.ts";
 import luck from "./luck.ts";
 
-// Flyweight factory file
+// File to apply flyweight pattern to grid cells
 import { Board } from "./board.ts";
+
+// File to apply Momento pattern to caches
+import { Cache } from "./cache.ts";
 
 // Tunable gameplay parameters
 const GAMEPLAY_ZOOM_LEVEL = 19;
@@ -17,7 +20,7 @@ const NEIGHBORHOOD_SIZE = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 
 // Implement board
-const board = new Board(TILE_DEGREES, 8);
+const board = new Board(TILE_DEGREES, NEIGHBORHOOD_SIZE);
 
 // Location of our classroom (as identified on Google Maps)
 const OAKES_CLASSROOM = leaflet.latLng(36.98949379578401, -122.06277128548504);
@@ -41,7 +44,7 @@ leaflet
   })
   .addTo(map);
 
-// Set up coins and player marker
+// Set up coins
 interface Coin {
   i: number;
   j: number;
@@ -52,40 +55,109 @@ const CoinsArray: Coin[] = [];
 const PlayerCoins: Coin[] = [];
 let lastCoin: Coin;
 
-const playerMarker = leaflet.marker(OAKES_CLASSROOM);
+// Set up cache
+const CacheArray: Cache[] = [];
 
-// Display coins
+// Hold cache state with momento
+const MomentoArray: string[] = [];
+
+// Display coins in status panel
 const coinCountDisplay = document.querySelector<HTMLDivElement>("#coins")!;
 coinCountDisplay.innerHTML = "0";
 
-// Add caches to the map by cell numbers
+// Set up initial player marker location
+const playerMarker = leaflet.marker(OAKES_CLASSROOM);
+playerMarker.bindTooltip("You are here!");
+playerMarker.addTo(map);
+
+// Set up buttons for player movement
+const sensorButton = document.querySelector<HTMLButtonElement>("#sensor");
+const resetButton = document.querySelector<HTMLButtonElement>("#reset");
+
+const directionButtons = {
+  north: document.querySelector<HTMLButtonElement>("#north"),
+  south: document.querySelector<HTMLButtonElement>("#south"),
+  west: document.querySelector<HTMLButtonElement>("#west"),
+  east: document.querySelector<HTMLButtonElement>("#east"),
+};
+
+// Sensor Button (Ask user for current location)
+sensorButton?.addEventListener("click", () => {
+  //to do
+});
+
+// Reset Button
+resetButton?.addEventListener("click", () => {
+  //to do
+});
+
+// Directional Buttons (Move Player)
+Object.keys(directionButtons).forEach((direction) => {
+  const button = directionButtons[direction as keyof typeof directionButtons];
+  button?.addEventListener("click", () => {
+    playerMove(direction);
+  });
+});
+
+// Function to move player
+function playerMove(direction: string) {
+  const tempPosition = playerMarker.getLatLng();
+  switch (direction) {
+    case "north":
+      tempPosition.lat += TILE_DEGREES;
+      break;
+    case "south":
+      tempPosition.lat -= TILE_DEGREES;
+      break;
+    case "west":
+      tempPosition.lng -= TILE_DEGREES;
+      break;
+    case "east":
+      tempPosition.lng += TILE_DEGREES;
+      break;
+  }
+
+  clearCaches();
+  playerMarker.setLatLng(tempPosition);
+  generateCaches();
+}
+
+// Function adds caches to the map by cell numbers
 function spawnCache(i: number, j: number) {
   // Convert cell numbers into lat/lng bounds
-  const origin = OAKES_CLASSROOM;
-  i = (origin.lat + (i * TILE_DEGREES)) / TILE_DEGREES;
-  j = (origin.lng + (j * TILE_DEGREES)) / TILE_DEGREES;
+  const i_coordinate = i * TILE_DEGREES;
+  const j_coordinate = j * TILE_DEGREES;
 
-  const point = leaflet.latLng(i, j);
+  const point = leaflet.latLng(i_coordinate, j_coordinate);
   const pointCell = board.getCellForPoint(point);
   const bounds = board.getCellBounds(pointCell);
+
+  const newCache = new Cache(i, j, 0);
+
+  // Each cache has a random point value, mutable by the player
+  const coinValue = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
+
+  newCache.numCoins = coinValue;
+  CacheArray.push(newCache);
+
+  const momentoFound = MomentoArray.find((momento) => {
+    const tempCache = new Cache(0, 0, 0);
+    tempCache.fromMomento(momento);
+
+    return tempCache.i == i && tempCache.j == j;
+  });
+
+  if (momentoFound) {
+    newCache.fromMomento(momentoFound);
+  }
 
   // Add a rectangle to the map to represent the cache
   const rect = leaflet.rectangle(bounds);
   rect.addTo(map);
 
-  // Set up temp point value for cache
-  let tempValue = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-
-  // Handle interactions with the cache
+  // Set up pop-ups for rectangles to handle interactions with the cache
   rect.bindPopup(() => {
-    // Each cache has a random point value, mutable by the player
-    let coinValue = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-
-    if (tempValue != coinValue) {
-      coinValue = tempValue;
-    }
-
-    for (let x = 0; x < coinValue; x++) {
+    for (let x = 0; x < newCache.numCoins; x++) {
       const newCoin: Coin = {
         i: i,
         j: j,
@@ -98,31 +170,31 @@ function spawnCache(i: number, j: number) {
     const popupDiv = document.createElement("div");
     popupDiv.innerHTML = `
       <div>
-        Cache Location: "${(i * TILE_DEGREES).toFixed(4)}, ${
-      (j * TILE_DEGREES).toFixed(4)
-    }" Available coins: <span id="value">${coinValue}</span>
+        Cache Location: "${i_coordinate.toFixed(4)}, ${
+      j_coordinate.toFixed(4)
+    }" Available coins: <span id="value">${newCache.numCoins}</span>
       </div>
       <button id="collect">Collect</button>
       <button id="deposit">Deposit</button>
     `;
 
-    // Clicking the buttons decrements/inc the cache's value and increments/dec the player's coins
+    // Clicking the button decrements the cache's value and increments the player's coins
     popupDiv
       .querySelector<HTMLButtonElement>("#collect")!
       .addEventListener("click", () => {
         // Check if cache has any coins left
-        if (coinValue <= 0) {
+        if (newCache.numCoins <= 0) {
           alert("No more coins to collect from this cache!");
           return; // Prevent collection if cache has no coins
         }
-        if (coinValue > 0) {
-          coinValue--;
+        if (newCache.numCoins > 0) {
+          newCache.numCoins--;
 
           let isFound = false;
 
           for (let x = 0; x < CoinsArray.length; x++) {
             if (CoinsArray[x].i == i && CoinsArray[x].j == j && !isFound) {
-              console.log(CoinsArray[x]);
+              //console.log(CoinsArray[x]);
               lastCoin = CoinsArray[x];
               PlayerCoins.push(CoinsArray[x]);
               CoinsArray.splice(x, 1);
@@ -132,15 +204,15 @@ function spawnCache(i: number, j: number) {
         }
 
         // Update coin display
-        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = coinValue
-          .toString();
+        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
+          .numCoins.toString();
         coinCountDisplay.innerHTML =
           `${PlayerCoins.length}  |  Recent Coin ID: (${
             (lastCoin.i * TILE_DEGREES).toFixed(4)
           }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
-        tempValue = coinValue;
       });
 
+    // Clicking the button increments the cache's value and decrements the player's coins
     popupDiv
       .querySelector<HTMLButtonElement>("#deposit")!
       .addEventListener("click", () => {
@@ -150,48 +222,84 @@ function spawnCache(i: number, j: number) {
           return; // Prevent deposit if player has no coins
         }
         if (PlayerCoins.length > 0) {
-          coinValue++;
+          newCache.numCoins++;
 
-          let hasdepositd = false;
+          let hasDeposited = false;
 
           for (let x = 0; x < PlayerCoins.length; x++) {
-            if (!hasdepositd) {
+            if (!hasDeposited) {
               lastCoin = PlayerCoins[x];
               CoinsArray.push(PlayerCoins[x]);
               PlayerCoins.splice(x, 1);
-              hasdepositd = true;
+              hasDeposited = true;
             }
           }
         }
 
         // Update coin display
-        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = coinValue
+        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
+          .numCoins
           .toString();
         coinCountDisplay.innerHTML =
           `${PlayerCoins.length}  |  Recent Coin ID: (${
             (lastCoin.i * TILE_DEGREES).toFixed(4)
           }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
-        tempValue = coinValue;
       });
 
     return popupDiv;
   });
 }
 
-function main() {
-  // set player and go!
-  playerMarker.bindTooltip("You are here!");
-  playerMarker.addTo(map);
+// Function to generate random caches
+function generateCaches() {
+  const cells = board.getCellsNearPoint(playerMarker.getLatLng());
 
-  // Look around the player's neighborhood for caches to spawn
-  for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
-    for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
-      // If location i,j is lucky enough, spawn a cache!
-      if (luck([i, j].toString()) < CACHE_SPAWN_PROBABILITY) {
-        spawnCache(i, j);
-      }
+  cells.forEach((cell) => {
+    const cacheRandom =
+      luck([cell.i, cell.j].toString()) < CACHE_SPAWN_PROBABILITY;
+
+    if (cacheRandom) {
+      spawnCache(cell.i, cell.j);
     }
-  }
+  });
 }
 
-main();
+// Function to clear caches
+function clearCaches() {
+  map.eachLayer((layer) => {
+    if (layer instanceof leaflet.Rectangle) {
+      map.removeLayer(layer);
+    }
+  });
+
+  const cells = board.getCellsNearPoint(playerMarker.getLatLng());
+
+  cells.forEach((cell) => {
+    CacheArray.forEach((cache) => {
+      if (cell.i == cache.i && cell.j == cache.j) {
+        const momentoExists = MomentoArray.some((momento) => {
+          const tempCache = new Cache(0, 0, 0);
+          tempCache.fromMomento(momento);
+
+          return tempCache.i == cache.i && tempCache.j == cache.j;
+        });
+
+        if (momentoExists) {
+          const foundIndex = MomentoArray.findIndex((momento) => {
+            const tempCache = new Cache(0, 0, 0);
+            tempCache.fromMomento(momento);
+
+            return tempCache.i == cache.i && tempCache.j == cache.j;
+          });
+
+          MomentoArray[foundIndex] = cache.toMomento();
+        } else {
+          MomentoArray.push(cache.toMomento());
+        }
+      }
+    });
+  });
+}
+
+// Generate and spawn caches on launch
+generateCaches();
