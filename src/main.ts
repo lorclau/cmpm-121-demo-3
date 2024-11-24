@@ -71,9 +71,6 @@ const CacheArray: Cache[] = [];
 // Hold cache state with momento
 let MomentoArray: string[] = [];
 
-// Set up line array to render player movement
-const LineArray: leaflet.LatLng[] = [];
-
 // Display coins in status panel
 const coinCountDisplay = document.querySelector<HTMLDivElement>(
   "#statusPanel",
@@ -115,9 +112,14 @@ Object.keys(directionButtons).forEach((direction) => {
   });
 });
 
+// Initialize the path array to hold line segments
+let pathSegments: leaflet.LatLng[] = [];
+
 // Function to move player
 function playerMove(direction: string) {
   const tempPosition = playerMarker.getLatLng();
+  const previousPosition = leaflet.latLng(tempPosition.lat, tempPosition.lng); // Store the previous position
+
   switch (direction) {
     case "north":
       tempPosition.lat += TILE_DEGREES;
@@ -136,8 +138,26 @@ function playerMove(direction: string) {
   clearCaches();
   playerMarker.setLatLng(tempPosition);
   generateCaches();
-  renderPath();
+  renderPath(previousPosition, tempPosition); // Pass previous and current positions
+  map.panTo(playerMarker.getLatLng());
   saveGame();
+}
+
+// Function stores player's location and draws a polyline representing the player's path
+function renderPath(
+  previousPosition: leaflet.LatLng,
+  currentPosition: leaflet.LatLng,
+) {
+  // Create a new line segment from the previous position to the current position
+  pathSegments.push(currentPosition); // Add current position to path segments
+
+  // Draw a polyline if the player has moved more than one step
+  if (pathSegments.length >= 1) {
+    const line = leaflet.polyline([previousPosition, currentPosition], {
+      color: "brown",
+    });
+    line.addTo(map);
+  }
 }
 
 // Function is triggered when the player's current location is found
@@ -147,22 +167,22 @@ function getCurrentLocation(e: { latlng: leaflet.LatLngExpression }) {
 
   clearCaches();
   generateCaches();
+
+  // Clear the path segments
+  pathSegments = [];
+
+  // Remove all existing polylines from the map
+  map.eachLayer((layer) => {
+    if (layer instanceof leaflet.Polyline) {
+      map.removeLayer(layer);
+    }
+  });
+
   saveGame();
 }
 
 // Attach the location found event to the map to trigger getCurrentLocation
 map.on("locationfound", getCurrentLocation);
-
-// Function stores player's location and draws a polyline representing the player's path
-function renderPath() {
-  // Add the player's current location to the path (LineArray)
-  LineArray.push(playerMarker.getLatLng());
-
-  // Draw a polyline if the player has moved more than one step
-  if (LineArray.length > 1) {
-    leaflet.polyline(LineArray, { color: "brown" }).addTo(map);
-  }
-}
 
 // Function adds caches to the map by cell numbers
 function spawnCache(i: number, j: number) {
@@ -373,10 +393,28 @@ function saveGame() {
 
   // Store player's last location
   localStorage.setItem("playerLoc", JSON.stringify(playerMarker.getLatLng()));
+
+  // Store path segments
+  localStorage.setItem("path", JSON.stringify(pathSegments));
 }
 
 // Function initializes the game by loading saved game state from localStorage and setting up cache
 function startGame() {
+  // Load and restore the path from localStorage
+  if (localStorage.getItem("path")) {
+    const storedPath = localStorage.getItem("path");
+    pathSegments = JSON.parse(storedPath!);
+
+    // Render the path on the map if there are segments
+    if (pathSegments.length > 0) {
+      leaflet.polyline(pathSegments, { color: "brown" }).addTo(map);
+      // Make sure the player marker is at the last position in the path
+      const lastPosition = pathSegments[pathSegments.length - 1];
+      playerMarker.setLatLng(lastPosition);
+      map.panTo(playerMarker.getLatLng());
+    }
+  }
+
   // generate new caches at the start
   generateCaches();
 
@@ -432,7 +470,20 @@ function resetGame() {
   );
 
   if (reset?.toLowerCase() === "yes") {
+    // Clear the path segments
+    pathSegments = [];
+
+    // Remove all existing polylines from the map
+    map.eachLayer((layer) => {
+      if (layer instanceof leaflet.Polyline) {
+        map.removeLayer(layer);
+      }
+    });
+
+    // Clear all saved data from localStorage
     localStorage.clear();
+
+    // Reload the page to start fresh
     location.reload();
   }
 }
