@@ -49,21 +49,36 @@ interface Coin {
   i: number;
   j: number;
   serial: number;
+  i_current: number;
+  j_current: number;
 }
 
-const CoinsArray: Coin[] = [];
-const PlayerCoins: Coin[] = [];
-let lastCoin: Coin;
+let CoinsArray: Coin[] = [];
+let PlayerCoins: Coin[] = [];
 
-// Set up cache
+// Initialize latest coin
+let lastCoin: Coin = {
+  i: 0,
+  j: 0,
+  serial: 0,
+  i_current: 0,
+  j_current: 0,
+};
+
+// Set up cache array
 const CacheArray: Cache[] = [];
 
 // Hold cache state with momento
-const MomentoArray: string[] = [];
+let MomentoArray: string[] = [];
+
+// Set up line array to render player movement
+const LineArray: leaflet.LatLng[] = [];
 
 // Display coins in status panel
-const coinCountDisplay = document.querySelector<HTMLDivElement>("#coins")!;
-coinCountDisplay.innerHTML = "0";
+const coinCountDisplay = document.querySelector<HTMLDivElement>(
+  "#statusPanel",
+)!;
+coinCountDisplay.innerHTML = "Coins: 0";
 
 // Set up initial player marker location
 const playerMarker = leaflet.marker(OAKES_CLASSROOM);
@@ -83,12 +98,13 @@ const directionButtons = {
 
 // Sensor Button (Ask user for current location)
 sensorButton?.addEventListener("click", () => {
-  //to do
+  map.stopLocate();
+  map.locate({ watch: true, setView: true });
 });
 
 // Reset Button
 resetButton?.addEventListener("click", () => {
-  //to do
+  resetGame();
 });
 
 // Directional Buttons (Move Player)
@@ -120,6 +136,32 @@ function playerMove(direction: string) {
   clearCaches();
   playerMarker.setLatLng(tempPosition);
   generateCaches();
+  renderPath();
+  saveGame();
+}
+
+// Function is triggered when the player's current location is found
+function getCurrentLocation(e: { latlng: leaflet.LatLngExpression }) {
+  playerMarker.setLatLng(e.latlng);
+  playerMarker.addTo(map).bindPopup("Current Location Found!").openPopup();
+
+  clearCaches();
+  generateCaches();
+  saveGame();
+}
+
+// Attach the location found event to the map to trigger getCurrentLocation
+map.on("locationfound", getCurrentLocation);
+
+// Function stores player's location and draws a polyline representing the player's path
+function renderPath() {
+  // Add the player's current location to the path (LineArray)
+  LineArray.push(playerMarker.getLatLng());
+
+  // Draw a polyline if the player has moved more than one step
+  if (LineArray.length > 1) {
+    leaflet.polyline(LineArray, { color: "brown" }).addTo(map);
+  }
 }
 
 // Function adds caches to the map by cell numbers
@@ -140,32 +182,45 @@ function spawnCache(i: number, j: number) {
   newCache.numCoins = coinValue;
   CacheArray.push(newCache);
 
+  // Attempt to find an existing "momento" in the MomentoArray that matches the current indices (i, j)
   const momentoFound = MomentoArray.find((momento) => {
     const tempCache = new Cache(0, 0, 0);
     tempCache.fromMomento(momento);
-
     return tempCache.i == i && tempCache.j == j;
   });
 
+  // If a matching momento is found, update the newCache with data from the found momento
   if (momentoFound) {
     newCache.fromMomento(momentoFound);
+  } else {
+    // If no matching momento is found, proceed to add new coins
+    for (let x = 0; x < newCache.numCoins; x++) {
+      const newCoin: Coin = {
+        i: i,
+        j: j,
+        serial: x,
+        i_current: i,
+        j_current: j,
+      };
+
+      // Check if the new coin already exists in the CoinsArray
+      const coinExists = CoinsArray.some((coin) => {
+        return coin == newCoin;
+      });
+
+      // If the coin doesn't exist in the array, add it to the CoinsArray
+      if (!coinExists) {
+        CoinsArray.push(newCoin);
+      }
+    }
   }
 
   // Add a rectangle to the map to represent the cache
   const rect = leaflet.rectangle(bounds);
   rect.addTo(map);
 
-  // Set up pop-ups for rectangles to handle interactions with the cache
+  // Set up pop-ups for cache rectangles to handle interactions with the cache
   rect.bindPopup(() => {
-    for (let x = 0; x < newCache.numCoins; x++) {
-      const newCoin: Coin = {
-        i: i,
-        j: j,
-        serial: x,
-      };
-      CoinsArray.push(newCoin);
-    }
-
     // The popup offers a description and buttons
     const popupDiv = document.createElement("div");
     popupDiv.innerHTML = `
@@ -187,27 +242,29 @@ function spawnCache(i: number, j: number) {
           alert("No more coins to collect from this cache!");
           return; // Prevent collection if cache has no coins
         }
-        if (newCache.numCoins > 0) {
+
+        // Find the coin in the CoinsArray
+        const coinIndex = CoinsArray.findIndex((coin) =>
+          coin.i_current === i && coin.j_current === j
+        );
+
+        if (coinIndex !== -1) {
+          // Set lastCoin if the coin is found
+          lastCoin = CoinsArray[coinIndex];
+
+          // Update cache and player coin collection
           newCache.numCoins--;
+          PlayerCoins.push(lastCoin);
 
-          let isFound = false;
-
-          for (let x = 0; x < CoinsArray.length; x++) {
-            if (CoinsArray[x].i == i && CoinsArray[x].j == j && !isFound) {
-              //console.log(CoinsArray[x]);
-              lastCoin = CoinsArray[x];
-              PlayerCoins.push(CoinsArray[x]);
-              CoinsArray.splice(x, 1);
-              isFound = true;
-            }
-          }
+          // Remove the coin from the array
+          CoinsArray.splice(coinIndex, 1);
         }
 
         // Update coin display
         popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
           .numCoins.toString();
         coinCountDisplay.innerHTML =
-          `${PlayerCoins.length}  |  Recent Coin ID: (${
+          `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
             (lastCoin.i * TILE_DEGREES).toFixed(4)
           }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
       });
@@ -232,6 +289,8 @@ function spawnCache(i: number, j: number) {
               CoinsArray.push(PlayerCoins[x]);
               PlayerCoins.splice(x, 1);
               hasDeposited = true;
+              lastCoin.i_current = i;
+              lastCoin.j_current = j;
             }
           }
         }
@@ -241,7 +300,7 @@ function spawnCache(i: number, j: number) {
           .numCoins
           .toString();
         coinCountDisplay.innerHTML =
-          `${PlayerCoins.length}  |  Recent Coin ID: (${
+          `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
             (lastCoin.i * TILE_DEGREES).toFixed(4)
           }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
       });
@@ -301,5 +360,82 @@ function clearCaches() {
   });
 }
 
-// Generate and spawn caches on launch
-generateCaches();
+// Function to save game state to local storage
+function saveGame() {
+  // Store coins collected
+  localStorage.setItem("player", JSON.stringify(PlayerCoins));
+
+  // Store all cache states
+  localStorage.setItem("caches", JSON.stringify(MomentoArray));
+
+  // Store coins
+  localStorage.setItem("coins", JSON.stringify(CoinsArray));
+
+  // Store player's last location
+  localStorage.setItem("playerLoc", JSON.stringify(playerMarker.getLatLng()));
+}
+
+// Function initializes the game by loading saved game state from localStorage and setting up cache
+function startGame() {
+  // generate new caches at the start
+  generateCaches();
+
+  // Load and restore the player's coin inventory if it exists in localStorage
+  if (localStorage.getItem("player")) {
+    const storedPlayer = localStorage.getItem("player");
+    PlayerCoins = JSON.parse(storedPlayer!);
+  }
+
+  // Load and restore the caches, and update CacheArray with stored cache data
+  if (localStorage.getItem("caches")) {
+    const storedCaches = localStorage.getItem("caches");
+    MomentoArray = JSON.parse(storedCaches!);
+
+    MomentoArray.forEach((momento) => {
+      CacheArray.forEach((cache) => {
+        const tempCache = new Cache(0, 0, 0);
+        tempCache.fromMomento(momento);
+
+        if (cache.i == tempCache.i && cache.j == tempCache.j) {
+          cache.fromMomento(momento);
+        }
+      });
+    });
+  }
+
+  // Load and restore coins from localStorage
+  if (localStorage.getItem("coins")) {
+    const storedCoins = localStorage.getItem("coins");
+    CoinsArray = JSON.parse(storedCoins!);
+  }
+
+  // Restore the player's last known location if available
+  if (localStorage.getItem("playerLoc")) {
+    const storedLoc = localStorage.getItem("playerLoc");
+    const playerLoc = JSON.parse(storedLoc!);
+    playerMarker.setLatLng(playerLoc);
+    playerMarker.addTo(map);
+    map.panTo(playerMarker.getLatLng());
+  }
+
+  // Clear caches and generate new ones
+  clearCaches();
+  generateCaches();
+}
+
+// Function resets the game by clearing all saved game data from localStorage and reloading the page
+// This action is confirmed by the user through a prompt
+function resetGame() {
+  const reset = prompt(
+    "This will erase all your game progress.",
+    "Are you sure you want to continue? (yes or no)",
+  );
+
+  if (reset?.toLowerCase() === "yes") {
+    localStorage.clear();
+    location.reload();
+  }
+}
+
+// Start the game when the page is loaded
+startGame();
