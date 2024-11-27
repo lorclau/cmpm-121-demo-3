@@ -1,5 +1,10 @@
 // main.ts
 
+// Add listener for saving the game state before the page is unloaded (tab closed or navigation).
+globalThis.addEventListener("beforeunload", () => {
+  saveGame();
+});
+
 // @deno-types="npm:@types/leaflet@^1.9.14"
 import leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -48,7 +53,7 @@ leaflet
 interface Coin {
   i: number;
   j: number;
-  serial: number;
+  serial: number | null;
   i_current: number;
   j_current: number;
 }
@@ -66,7 +71,7 @@ let lastCoin: Coin = {
 };
 
 // Set up cache array
-const CacheArray: Cache[] = [];
+let CacheArray: Cache[] = [];
 
 // Hold cache state with momento
 let MomentoArray: string[] = [];
@@ -75,8 +80,12 @@ let MomentoArray: string[] = [];
 const coinCountDisplay = document.querySelector<HTMLDivElement>(
   "#statusPanel",
 )!;
-coinCountDisplay.innerHTML = "Coins: 0";
-
+//coinCountDisplay.innerHTML = "Coins: 0";
+/*coinCountDisplay.innerHTML =
+          `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
+            (lastCoin.i * TILE_DEGREES).toFixed(4)
+          }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
+*/
 // Set up initial player marker location
 const playerMarker = leaflet.marker(OAKES_CLASSROOM);
 playerMarker.bindTooltip("You are here!");
@@ -154,7 +163,7 @@ function renderPath(
   // Draw a polyline if the player has moved more than one step
   if (pathSegments.length >= 1) {
     const line = leaflet.polyline([previousPosition, currentPosition], {
-      color: "brown",
+      color: "green",
     });
     line.addTo(map);
   }
@@ -167,17 +176,6 @@ function getCurrentLocation(e: { latlng: leaflet.LatLngExpression }) {
 
   clearCaches();
   generateCaches();
-
-  // Clear the path segments
-  pathSegments = [];
-
-  // Remove all existing polylines from the map
-  map.eachLayer((layer) => {
-    if (layer instanceof leaflet.Polyline) {
-      map.removeLayer(layer);
-    }
-  });
-
   saveGame();
 }
 
@@ -278,6 +276,31 @@ function spawnCache(i: number, j: number) {
 
           // Remove the coin from the array
           CoinsArray.splice(coinIndex, 1);
+
+          // Create the updated cache after collecting a coin
+          const updatedCache = new Cache(
+            newCache.i,
+            newCache.j,
+            newCache.numCoins,
+          );
+
+          // Update the cache state using the 'toMomento' and 'fromMomento' methods
+          updatedCache.fromMomento(newCache.toMomento()); // This ensures the cache is updated based on its current state
+
+          // Find if a cache exists in MomentoArray and replace it, or add it if not found
+          const cacheIndex = MomentoArray.findIndex(
+            (momento) =>
+              newCache.i === JSON.parse(momento).i &&
+              newCache.j === JSON.parse(momento).j,
+          );
+
+          if (cacheIndex !== -1) {
+            // Update the existing cache in MomentoArray
+            MomentoArray[cacheIndex] = updatedCache.toMomento();
+          } else {
+            // Add the new cache if not already in MomentoArray
+            MomentoArray.push(updatedCache.toMomento());
+          }
         }
 
         // Update coin display
@@ -312,6 +335,31 @@ function spawnCache(i: number, j: number) {
               lastCoin.i_current = i;
               lastCoin.j_current = j;
             }
+          }
+
+          // Create the updated cache after depositing a coin
+          const updatedCache = new Cache(
+            newCache.i,
+            newCache.j,
+            newCache.numCoins,
+          );
+
+          // Update the cache state using the 'toMomento' and 'fromMomento' methods
+          updatedCache.fromMomento(newCache.toMomento()); // Ensure the cache reflects the new state
+
+          // Find if a cache exists in MomentoArray and replace it, or add it if not found
+          const cacheIndex = MomentoArray.findIndex(
+            (momento) =>
+              newCache.i === JSON.parse(momento).i &&
+              newCache.j === JSON.parse(momento).j,
+          );
+
+          if (cacheIndex !== -1) {
+            // Update the existing cache in MomentoArray
+            MomentoArray[cacheIndex] = updatedCache.toMomento();
+          } else {
+            // Add the new cache if not already in MomentoArray
+            MomentoArray.push(updatedCache.toMomento());
           }
         }
 
@@ -382,84 +430,85 @@ function clearCaches() {
 
 // Function to save game state to local storage
 function saveGame() {
-  // Store coins collected
+  // Store each item to local storage
   localStorage.setItem("player", JSON.stringify(PlayerCoins));
-
-  // Store all cache states
   localStorage.setItem("caches", JSON.stringify(MomentoArray));
-
-  // Store coins
   localStorage.setItem("coins", JSON.stringify(CoinsArray));
-
-  // Store player's last location
   localStorage.setItem("playerLoc", JSON.stringify(playerMarker.getLatLng()));
-
-  // Store path segments
   localStorage.setItem("path", JSON.stringify(pathSegments));
+  // Store the last coin collected (if any)
+  localStorage.setItem("lastCoin", JSON.stringify(lastCoin));
 }
 
-// Function initializes the game by loading saved game state from localStorage and setting up cache
-function startGame() {
-  // Load and restore the path from localStorage
-  if (localStorage.getItem("path")) {
-    const storedPath = localStorage.getItem("path");
-    pathSegments = JSON.parse(storedPath!);
+// Function to load and restore game state from local storage when the page is loaded
+function loadGame() {
+  // Restore the player's coin inventory if it exists in localStorage
+  if (localStorage.getItem("player")) {
+    PlayerCoins = JSON.parse(localStorage.getItem("player")!);
+  }
 
-    // Render the path on the map if there are segments
+  // Load and restore the caches
+  if (localStorage.getItem("caches")) {
+    MomentoArray = JSON.parse(localStorage.getItem("caches")!);
+
+    // Iterate through the stored caches and update them accordingly
+    MomentoArray.forEach((momento) => {
+      // Create an updatedCache for each stored cache data
+      const updatedCache = new Cache(0, 0, 0); // Assuming you create a Cache instance like this
+      updatedCache.fromMomento(momento); // Update the Cache with data from the momento
+
+      // Optionally, perform any additional updates you need (like checking if the cache is active)
+      // For example, checking if the cache should still have coins or if it has been collected
+      // Then, push the updated cache into the CacheArray
+      CacheArray.push(updatedCache);
+    });
+  }
+
+  // Restore the player's last known location if available
+  if (localStorage.getItem("playerLoc")) {
+    const storedLoc = JSON.parse(localStorage.getItem("playerLoc")!);
+    playerMarker.setLatLng(storedLoc);
+    playerMarker.addTo(map);
+    map.panTo(playerMarker.getLatLng());
+  }
+
+  // Restore path segments if available
+  if (localStorage.getItem("path")) {
+    const storedPath = JSON.parse(localStorage.getItem("path")!);
+    pathSegments = storedPath;
     if (pathSegments.length > 0) {
-      leaflet.polyline(pathSegments, { color: "brown" }).addTo(map);
-      // Make sure the player marker is at the last position in the path
+      leaflet.polyline(pathSegments, { color: "green" }).addTo(map);
       const lastPosition = pathSegments[pathSegments.length - 1];
       playerMarker.setLatLng(lastPosition);
       map.panTo(playerMarker.getLatLng());
     }
   }
 
-  // generate new caches at the start
-  generateCaches();
-
-  // Load and restore the player's coin inventory if it exists in localStorage
-  if (localStorage.getItem("player")) {
-    const storedPlayer = localStorage.getItem("player");
-    PlayerCoins = JSON.parse(storedPlayer!);
-  }
-
-  // Load and restore the caches, and update CacheArray with stored cache data
-  if (localStorage.getItem("caches")) {
-    const storedCaches = localStorage.getItem("caches");
-    MomentoArray = JSON.parse(storedCaches!);
-
-    MomentoArray.forEach((momento) => {
-      CacheArray.forEach((cache) => {
-        const tempCache = new Cache(0, 0, 0);
-        tempCache.fromMomento(momento);
-
-        if (cache.i == tempCache.i && cache.j == tempCache.j) {
-          cache.fromMomento(momento);
-        }
-      });
-    });
-  }
-
-  // Load and restore coins from localStorage
+  // Restore coins if available
   if (localStorage.getItem("coins")) {
-    const storedCoins = localStorage.getItem("coins");
-    CoinsArray = JSON.parse(storedCoins!);
+    CoinsArray = JSON.parse(localStorage.getItem("coins")!);
   }
 
-  // Restore the player's last known location if available
-  if (localStorage.getItem("playerLoc")) {
-    const storedLoc = localStorage.getItem("playerLoc");
-    const playerLoc = JSON.parse(storedLoc!);
-    playerMarker.setLatLng(playerLoc);
-    playerMarker.addTo(map);
-    map.panTo(playerMarker.getLatLng());
+  // Load and restore the last coin information (if available)
+  if (localStorage.getItem("lastCoin")) {
+    const storedLastCoin = localStorage.getItem("lastCoin");
+    lastCoin = JSON.parse(storedLastCoin!);
   }
 
-  // Clear caches and generate new ones
-  clearCaches();
+  // Update the coin display after loading the player coins from localStorage
+  coinCountDisplay.innerHTML =
+    `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
+      (lastCoin.i * TILE_DEGREES).toFixed(4)
+    }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
+
+  // Generate caches at the start
   generateCaches();
 }
+
+// Start the game when the page is loaded
+document.addEventListener("DOMContentLoaded", () => {
+  loadGame();
+});
 
 // Function resets the game by clearing all saved game data from localStorage and reloading the page
 // This action is confirmed by the user through a prompt
@@ -470,15 +519,35 @@ function resetGame() {
   );
 
   if (reset?.toLowerCase() === "yes") {
-    // Clear the path segments
-    pathSegments = [];
+    // Clear all arrays and reset the state
+    CoinsArray = []; // Clear the coins array
+    PlayerCoins = []; // Clear the player's collected coins
+    CacheArray = []; // Clear the cache array
+    MomentoArray = []; // Clear the momento cache states
 
-    // Remove all existing polylines from the map
+    // Initialize last coin ID
+    lastCoin.i = 0;
+    lastCoin.j = 0;
+    lastCoin.serial = null;
+
+    // Clear path segments and remove all existing polylines from the map
+    pathSegments = [];
     map.eachLayer((layer) => {
       if (layer instanceof leaflet.Polyline) {
         map.removeLayer(layer);
       }
     });
+
+    // Clear cache markers (rectangles) from the map
+    map.eachLayer((layer) => {
+      if (layer instanceof leaflet.Rectangle) {
+        map.removeLayer(layer);
+      }
+    });
+
+    // Reset the player's location to the initial position (or some default start point)
+    playerMarker.setLatLng(OAKES_CLASSROOM); // Set back to the original location
+    map.panTo(playerMarker.getLatLng());
 
     // Clear all saved data from localStorage
     localStorage.clear();
@@ -487,6 +556,3 @@ function resetGame() {
     location.reload();
   }
 }
-
-// Start the game when the page is loaded
-startGame();
