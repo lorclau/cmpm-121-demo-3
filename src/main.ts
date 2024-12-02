@@ -182,6 +182,38 @@ function getCurrentLocation(e: { latlng: leaflet.LatLngExpression }) {
 // Attach the location found event to the map to trigger getCurrentLocation
 map.on("locationfound", getCurrentLocation);
 
+// Function to handle coin creation
+function createCoinsForCache(i: number, j: number, numCoins: number): void {
+  for (let x = 0; x < numCoins; x++) {
+    const newCoin: Coin = {
+      i: i,
+      j: j,
+      serial: x,
+      i_current: i,
+      j_current: j,
+    };
+
+    // Check if the new coin already exists in the CoinsArray
+    const coinExists = CoinsArray.some((coin) => {
+      return coin == newCoin;
+    });
+
+    // If the coin doesn't exist in the array, add it to the CoinsArray
+    if (!coinExists) {
+      CoinsArray.push(newCoin);
+    }
+  }
+}
+
+// Function to handle searching for an existing momento
+function findMomento(i: number, j: number): string | undefined {
+  return MomentoArray.find((momento) => {
+    const tempCache = new Cache(0, 0, 0);
+    tempCache.fromMomento(momento);
+    return tempCache.i == i && tempCache.j == j;
+  });
+}
+
 // Function adds caches to the map by cell numbers
 function spawnCache(i: number, j: number) {
   // Convert cell numbers into lat/lng bounds
@@ -196,41 +228,18 @@ function spawnCache(i: number, j: number) {
 
   // Each cache has a random point value, mutable by the player
   const coinValue = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-
   newCache.numCoins = coinValue;
   CacheArray.push(newCache);
 
   // Attempt to find an existing "momento" in the MomentoArray that matches the current indices (i, j)
-  const momentoFound = MomentoArray.find((momento) => {
-    const tempCache = new Cache(0, 0, 0);
-    tempCache.fromMomento(momento);
-    return tempCache.i == i && tempCache.j == j;
-  });
+  const momentoFound = findMomento(i, j);
 
   // If a matching momento is found, update the newCache with data from the found momento
   if (momentoFound) {
     newCache.fromMomento(momentoFound);
   } else {
     // If no matching momento is found, proceed to add new coins
-    for (let x = 0; x < newCache.numCoins; x++) {
-      const newCoin: Coin = {
-        i: i,
-        j: j,
-        serial: x,
-        i_current: i,
-        j_current: j,
-      };
-
-      // Check if the new coin already exists in the CoinsArray
-      const coinExists = CoinsArray.some((coin) => {
-        return coin == newCoin;
-      });
-
-      // If the coin doesn't exist in the array, add it to the CoinsArray
-      if (!coinExists) {
-        CoinsArray.push(newCoin);
-      }
-    }
+    createCoinsForCache(i, j, newCache.numCoins);
   }
 
   // Call function to render the cache on the map
@@ -516,11 +525,6 @@ function loadGame() {
   generateCaches();
 }
 
-// Start the game when the page is loaded
-document.addEventListener("DOMContentLoaded", () => {
-  loadGame();
-});
-
 // Function resets the game by clearing all saved game data from localStorage and reloading the page
 // This action is confirmed by the user through a prompt
 function resetGame() {
@@ -567,3 +571,8 @@ function resetGame() {
     location.reload();
   }
 }
+
+// Start the game when the page is loaded
+document.addEventListener("DOMContentLoaded", () => {
+  loadGame();
+});
