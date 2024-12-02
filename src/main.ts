@@ -247,143 +247,145 @@ function renderCacheOnMap(
   const rect = leaflet.rectangle(bounds);
   rect.addTo(map);
 
-  // Set up pop-ups for cache rectangles to handle interactions with the cache
-  rect.bindPopup(() => {
-    // The popup offers a description and buttons
-    const popupDiv = document.createElement("div");
-    popupDiv.innerHTML = `
-      <div>
-        Cache Location: "${(i * TILE_DEGREES).toFixed(4)}, ${
-      (j * TILE_DEGREES).toFixed(4)
-    }" Available coins: <span id="value">${newCache.numCoins}</span>
-      </div>
-      <button id="collect">Collect</button>
-      <button id="deposit">Deposit</button>
-    `;
+  // Use the generateCachePopup function to bind the popup
+  rect.bindPopup(() => generateCachePopup(newCache, i, j));
+}
 
-    // Clicking the button decrements the cache's value and increments the player's coins
-    popupDiv
-      .querySelector<HTMLButtonElement>("#collect")!
-      .addEventListener("click", () => {
-        // Check if cache has any coins left
-        if (newCache.numCoins <= 0) {
-          alert("No more coins to collect from this cache!");
-          return; // Prevent collection if cache has no coins
-        }
+function generateCachePopup(newCache: Cache, i: number, j: number) {
+  // Create the popup HTML structure
+  const popupDiv = document.createElement("div");
+  popupDiv.innerHTML = `
+    <div>
+      Cache Location: "${(i * TILE_DEGREES).toFixed(4)}, ${
+    (j * TILE_DEGREES).toFixed(4)
+  }" Available coins: <span id="value">${newCache.numCoins}</span>
+    </div>
+    <button id="collect">Collect</button>
+    <button id="deposit">Deposit</button>
+  `;
 
-        // Find the coin in the CoinsArray
-        const coinIndex = CoinsArray.findIndex((coin) =>
-          coin.i_current === i && coin.j_current === j
+  // Clicking the "collect" button decrements the cache's value and increments the player's coins
+  popupDiv
+    .querySelector<HTMLButtonElement>("#collect")!
+    .addEventListener("click", () => {
+      // Check if cache has any coins left
+      if (newCache.numCoins <= 0) {
+        alert("No more coins to collect from this cache!");
+        return; // Prevent collection if cache has no coins
+      }
+
+      // Find the coin in the CoinsArray
+      const coinIndex = CoinsArray.findIndex((coin) =>
+        coin.i_current === i && coin.j_current === j
+      );
+
+      if (coinIndex !== -1) {
+        // Set lastCoin if the coin is found
+        lastCoin = CoinsArray[coinIndex];
+
+        // Update cache and player coin collection
+        newCache.numCoins--;
+        PlayerCoins.push(lastCoin);
+
+        // Remove the coin from the array
+        CoinsArray.splice(coinIndex, 1);
+
+        // Create the updated cache after collecting a coin
+        const updatedCache = new Cache(
+          newCache.i,
+          newCache.j,
+          newCache.numCoins,
         );
 
-        if (coinIndex !== -1) {
-          // Set lastCoin if the coin is found
-          lastCoin = CoinsArray[coinIndex];
+        // Update the cache state using the 'toMomento' and 'fromMomento' methods
+        updatedCache.fromMomento(newCache.toMomento()); // This ensures the cache is updated based on its current state
 
-          // Update cache and player coin collection
-          newCache.numCoins--;
-          PlayerCoins.push(lastCoin);
+        // Find if a cache exists in MomentoArray and replace it, or add it if not found
+        const cacheIndex = MomentoArray.findIndex(
+          (momento) =>
+            newCache.i === JSON.parse(momento).i &&
+            newCache.j === JSON.parse(momento).j,
+        );
 
-          // Remove the coin from the array
-          CoinsArray.splice(coinIndex, 1);
+        if (cacheIndex !== -1) {
+          // Update the existing cache in MomentoArray
+          MomentoArray[cacheIndex] = updatedCache.toMomento();
+        } else {
+          // Add the new cache if not already in MomentoArray
+          MomentoArray.push(updatedCache.toMomento());
+        }
+      }
 
-          // Create the updated cache after collecting a coin
-          const updatedCache = new Cache(
-            newCache.i,
-            newCache.j,
-            newCache.numCoins,
-          );
+      // Update coin display
+      popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
+        .numCoins.toString();
+      coinCountDisplay.innerHTML =
+        `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
+          (lastCoin.i * TILE_DEGREES).toFixed(4)
+        }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
+    });
 
-          // Update the cache state using the 'toMomento' and 'fromMomento' methods
-          updatedCache.fromMomento(newCache.toMomento()); // This ensures the cache is updated based on its current state
+  // Clicking the "deposit" button increments the cache's value and decrements the player's coins
+  popupDiv
+    .querySelector<HTMLButtonElement>("#deposit")!
+    .addEventListener("click", () => {
+      // Check if player has any coins left
+      if (PlayerCoins.length <= 0) {
+        alert("No more coins to deposit!");
+        return; // Prevent deposit if player has no coins
+      }
+      if (PlayerCoins.length > 0) {
+        newCache.numCoins++;
 
-          // Find if a cache exists in MomentoArray and replace it, or add it if not found
-          const cacheIndex = MomentoArray.findIndex(
-            (momento) =>
-              newCache.i === JSON.parse(momento).i &&
-              newCache.j === JSON.parse(momento).j,
-          );
+        let hasDeposited = false;
 
-          if (cacheIndex !== -1) {
-            // Update the existing cache in MomentoArray
-            MomentoArray[cacheIndex] = updatedCache.toMomento();
-          } else {
-            // Add the new cache if not already in MomentoArray
-            MomentoArray.push(updatedCache.toMomento());
+        for (let x = 0; x < PlayerCoins.length; x++) {
+          if (!hasDeposited) {
+            lastCoin = PlayerCoins[x];
+            CoinsArray.push(PlayerCoins[x]);
+            PlayerCoins.splice(x, 1);
+            hasDeposited = true;
+            lastCoin.i_current = i;
+            lastCoin.j_current = j;
           }
         }
 
-        // Update coin display
-        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
-          .numCoins.toString();
-        coinCountDisplay.innerHTML =
-          `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
-            (lastCoin.i * TILE_DEGREES).toFixed(4)
-          }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
-      });
+        // Create the updated cache after depositing a coin
+        const updatedCache = new Cache(
+          newCache.i,
+          newCache.j,
+          newCache.numCoins,
+        );
 
-    // Clicking the button increments the cache's value and decrements the player's coins
-    popupDiv
-      .querySelector<HTMLButtonElement>("#deposit")!
-      .addEventListener("click", () => {
-        // Check if player has any coins left
-        if (PlayerCoins.length <= 0) {
-          alert("No more coins to deposit!");
-          return; // Prevent deposit if player has no coins
+        // Update the cache state using the 'toMomento' and 'fromMomento' methods
+        updatedCache.fromMomento(newCache.toMomento()); // Ensure the cache reflects the new state
+
+        // Find if a cache exists in MomentoArray and replace it, or add it if not found
+        const cacheIndex = MomentoArray.findIndex(
+          (momento) =>
+            newCache.i === JSON.parse(momento).i &&
+            newCache.j === JSON.parse(momento).j,
+        );
+
+        if (cacheIndex !== -1) {
+          // Update the existing cache in MomentoArray
+          MomentoArray[cacheIndex] = updatedCache.toMomento();
+        } else {
+          // Add the new cache if not already in MomentoArray
+          MomentoArray.push(updatedCache.toMomento());
         }
-        if (PlayerCoins.length > 0) {
-          newCache.numCoins++;
+      }
 
-          let hasDeposited = false;
+      // Update coin display
+      popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
+        .numCoins.toString();
+      coinCountDisplay.innerHTML =
+        `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
+          (lastCoin.i * TILE_DEGREES).toFixed(4)
+        }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
+    });
 
-          for (let x = 0; x < PlayerCoins.length; x++) {
-            if (!hasDeposited) {
-              lastCoin = PlayerCoins[x];
-              CoinsArray.push(PlayerCoins[x]);
-              PlayerCoins.splice(x, 1);
-              hasDeposited = true;
-              lastCoin.i_current = i;
-              lastCoin.j_current = j;
-            }
-          }
-
-          // Create the updated cache after depositing a coin
-          const updatedCache = new Cache(
-            newCache.i,
-            newCache.j,
-            newCache.numCoins,
-          );
-
-          // Update the cache state using the 'toMomento' and 'fromMomento' methods
-          updatedCache.fromMomento(newCache.toMomento()); // Ensure the cache reflects the new state
-
-          // Find if a cache exists in MomentoArray and replace it, or add it if not found
-          const cacheIndex = MomentoArray.findIndex(
-            (momento) =>
-              newCache.i === JSON.parse(momento).i &&
-              newCache.j === JSON.parse(momento).j,
-          );
-
-          if (cacheIndex !== -1) {
-            // Update the existing cache in MomentoArray
-            MomentoArray[cacheIndex] = updatedCache.toMomento();
-          } else {
-            // Add the new cache if not already in MomentoArray
-            MomentoArray.push(updatedCache.toMomento());
-          }
-        }
-
-        // Update coin display
-        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
-          .numCoins.toString();
-        coinCountDisplay.innerHTML =
-          `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
-            (lastCoin.i * TILE_DEGREES).toFixed(4)
-          }, ${(lastCoin.j * TILE_DEGREES).toFixed(4)}) #${lastCoin.serial}`;
-      });
-
-    return popupDiv;
-  });
+  return popupDiv;
 }
 
 // Function to generate random caches
