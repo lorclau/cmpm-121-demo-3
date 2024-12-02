@@ -233,6 +233,16 @@ function spawnCache(i: number, j: number) {
     }
   }
 
+  // Call function to render the cache on the map
+  renderCacheOnMap(bounds, newCache, i, j);
+}
+
+function renderCacheOnMap(
+  bounds: leaflet.LatLngBounds,
+  newCache: Cache,
+  i: number,
+  j: number,
+) {
   // Add a rectangle to the map to represent the cache
   const rect = leaflet.rectangle(bounds);
   rect.addTo(map);
@@ -243,8 +253,8 @@ function spawnCache(i: number, j: number) {
     const popupDiv = document.createElement("div");
     popupDiv.innerHTML = `
       <div>
-        Cache Location: "${i_coordinate.toFixed(4)}, ${
-      j_coordinate.toFixed(4)
+        Cache Location: "${(i * TILE_DEGREES).toFixed(4)}, ${
+      (j * TILE_DEGREES).toFixed(4)
     }" Available coins: <span id="value">${newCache.numCoins}</span>
       </div>
       <button id="collect">Collect</button>
@@ -365,8 +375,7 @@ function spawnCache(i: number, j: number) {
 
         // Update coin display
         popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML = newCache
-          .numCoins
-          .toString();
+          .numCoins.toString();
         coinCountDisplay.innerHTML =
           `Coins: ${PlayerCoins.length}  |  Recent Coin ID: (${
             (lastCoin.i * TILE_DEGREES).toFixed(4)
